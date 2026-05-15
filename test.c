@@ -2,21 +2,35 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
+#include "parameters.h"
 
-void sparse_dense_mult(
-    uint64_t *result,
-    size_t result_words,
+void vector_mult(
+    uint64_t *o,
     const uint32_t *support,
     size_t weight,
-    const uint64_t *dense,
-    size_t dense_words
+    const uint64_t *dense
 );
 
-static int check(const char *name, const uint64_t *got, const uint64_t *expected, size_t words) {
-    for (size_t i = 0; i < words; i++) {
+static void clear_vec(uint64_t *v) {
+    memset(v, 0, VEC_N_SIZE_64 * sizeof(uint64_t));
+}
+
+static void toggle_bit(uint64_t *v, size_t bit_pos) {
+    v[bit_pos / 64] ^= 1ULL << (bit_pos % 64);
+}
+
+static int get_bit(const uint64_t *v, size_t bit_pos) {
+    return (v[bit_pos / 64] >> (bit_pos % 64)) & 1ULL;
+}
+
+static int check(const char *name, const uint64_t *got, const uint64_t *expected) {
+    for (size_t i = 0; i < VEC_N_SIZE_64; i++) {
         if (got[i] != expected[i]) {
             printf("[FAIL] %s\n", name);
-            printf("word %zu: got 0x%016lx, expected 0x%016lx\n", i, got[i], expected[i]);
+            printf("word %zu: got 0x%016lx, expected 0x%016lx\n",
+                   i,
+                   (unsigned long)got[i],
+                   (unsigned long)expected[i]);
             return 0;
         }
     }
@@ -25,137 +39,285 @@ static int check(const char *name, const uint64_t *got, const uint64_t *expected
     return 1;
 }
 
+/*
+ * Shit reference implementation:
+ *
+ * for every dense bit j and every sparse support position s,
+ * output bit is (j + s) mod PARAM_N.
+ *
+ * just for testing
+ */
+static void reference_sparse_dense_mod(
+    uint64_t *expected,
+    const uint32_t *support,
+    size_t weight,
+    const uint64_t *dense
+) {
+    clear_vec(expected);
+
+    for (size_t i = 0; i < weight; i++) {
+        uint32_t shift = support[i];
+
+        for (size_t bit = 0; bit < PARAM_N; bit++) {
+            if (get_bit(dense, bit)) {
+                size_t out_bit = (bit + shift) % PARAM_N;
+                toggle_bit(expected, out_bit);
+            }
+        }
+    }
+}
+
 int main(void) {
     int ok = 1;
 
     /*
      * Test 1:
-     * dense = 1
-     * support = {3}
+     * Normal shift inside the first word.
+     *
+     * dense = X^10
+     * support = {7}
      *
      * Expected:
-     * 1 << 3 = 8
+     * X^17
      */
     {
-        uint64_t result[2];
-        uint64_t dense[1] = {1};
-        uint32_t support[1] = {3};
-        uint64_t expected[2] = {8, 0};
+        uint64_t result[VEC_N_SIZE_64];
+        uint64_t dense[VEC_N_SIZE_64];
+        uint64_t expected[VEC_N_SIZE_64];
+        uint32_t support[1] = {7};
 
-        sparse_dense_mult(result, 2, support, 1, dense, 1);
-        ok &= check("1 shifted by 3", result, expected, 2);
+        clear_vec(dense);
+        clear_vec(expected);
+
+        toggle_bit(dense, 10);
+        toggle_bit(expected, 17);
+
+        vector_mult(result, support, 1, dense);
+        ok &= check("normal bit shift: X^10 * X^7 = X^17", result, expected);
     }
 
     /*
      * Test 2:
-     * dense = 0b10001 = bits 0 and 4
-     * support = {2}
+     * Cross 64-bit word boundary.
+     *
+     * dense = X^63
+     * support = {1}
      *
      * Expected:
-     * bits 2 and 6 = 0b1000100 = 68
+     * X^64
      */
     {
-        uint64_t result[2];
-        uint64_t dense[1] = {(1ULL << 0) | (1ULL << 4)};
-        uint32_t support[1] = {2};
-        uint64_t expected[2] = {(1ULL << 2) | (1ULL << 6), 0};
+        uint64_t result[VEC_N_SIZE_64];
+        uint64_t dense[VEC_N_SIZE_64];
+        uint64_t expected[VEC_N_SIZE_64];
+        uint32_t support[1] = {1};
 
-        sparse_dense_mult(result, 2, support, 1, dense, 1);
-        ok &= check("bits 0 and 4 shifted by 2", result, expected, 2);
+        clear_vec(dense);
+        clear_vec(expected);
+
+        toggle_bit(dense, 63);
+        toggle_bit(expected, 64);
+
+        vector_mult(result, support, 1, dense);
+        ok &= check("cross word boundary: X^63 * X = X^64", result, expected);
     }
 
     /*
      * Test 3:
-     * dense = 1
-     * support = {2, 5}
+     * Whole-word shift.
+     *
+     * dense = X^3
+     * support = {64}
      *
      * Expected:
-     * (1 << 2) XOR (1 << 5) = 4 XOR 32 = 36
+     * X^67
      */
     {
-        uint64_t result[2];
-        uint64_t dense[1] = {1};
-        uint32_t support[2] = {2, 5};
-        uint64_t expected[2] = {(1ULL << 2) ^ (1ULL << 5), 0};
+        uint64_t result[VEC_N_SIZE_64];
+        uint64_t dense[VEC_N_SIZE_64];
+        uint64_t expected[VEC_N_SIZE_64];
+        uint32_t support[1] = {64};
 
-        sparse_dense_mult(result, 2, support, 2, dense, 1);
-        ok &= check("support positions 2 and 5", result, expected, 2);
+        clear_vec(dense);
+        clear_vec(expected);
+
+        toggle_bit(dense, 3);
+        toggle_bit(expected, 67);
+
+        vector_mult(result, support, 1, dense);
+        ok &= check("whole-word shift: X^3 * X^64 = X^67", result, expected);
     }
 
     /*
      * Test 4:
-     * dense = bit 63 set
+     * Exact wraparound modulo X^n - 1.
+     *
+     * dense = X^(n - 1)
      * support = {1}
      *
+     * Unreduced:
+     * X^n
+     *
+     * Reduced:
+     * X^n = 1
+     *
      * Expected:
-     * bit 63 shifted by 1 becomes bit 64,
-     * so result[0] = 0, result[1] = 1
+     * X^0
      */
     {
-        uint64_t result[2];
-        uint64_t dense[1] = {1ULL << 63};
+        uint64_t result[VEC_N_SIZE_64];
+        uint64_t dense[VEC_N_SIZE_64];
+        uint64_t expected[VEC_N_SIZE_64];
         uint32_t support[1] = {1};
-        uint64_t expected[2] = {0, 1};
 
-        sparse_dense_mult(result, 2, support, 1, dense, 1);
-        ok &= check("cross word boundary", result, expected, 2);
+        clear_vec(dense);
+        clear_vec(expected);
+
+        toggle_bit(dense, PARAM_N - 1);
+        toggle_bit(expected, 0);
+
+        vector_mult(result, support, 1, dense);
+        ok &= check("mod wrap: X^(n-1) * X = 1", result, expected);
     }
 
     /*
      * Test 5:
-     * dense = 0x1234
-     * support = {64}
+     * Larger wraparound.
      *
-     * Expected:
-     * shift by exactly one word:
-     * result[0] = 0
-     * result[1] = 0x1234
+     * dense = X^(n - 3)
+     * support = {5}
+     *
+     * Unreduced:
+     * X^(n + 2)
+     *
+     * Reduced:
+     * X^2
      */
     {
-        uint64_t result[3];
-        uint64_t dense[1] = {0x1234};
-        uint32_t support[1] = {64};
-        uint64_t expected[3] = {0, 0x1234, 0};
+        uint64_t result[VEC_N_SIZE_64];
+        uint64_t dense[VEC_N_SIZE_64];
+        uint64_t expected[VEC_N_SIZE_64];
+        uint32_t support[1] = {5};
 
-        sparse_dense_mult(result, 3, support, 1, dense, 1);
-        ok &= check("whole word shift by 64", result, expected, 3);
+        clear_vec(dense);
+        clear_vec(expected);
+
+        toggle_bit(dense, PARAM_N - 3);
+        toggle_bit(expected, 2);
+
+        vector_mult(result, support, 1, dense);
+        ok &= check("mod wrap: X^(n-3) * X^5 = X^2", result, expected);
     }
 
     /*
-    * Test 6:
-    * This test catches XOR vs OR.
-    *
-    * dense = bits 0 and 1
-    * support = {0, 1}
-    *
-    * First shifted copy:
-    *   dense << 0 = bits 0 and 1
-    *
-    * Second shifted copy:
-    *   dense << 1 = bits 1 and 2
-    *
-    * XOR accumulation:
-    *   bit 0 = 1
-    *   bit 1 = 1 XOR 1 = 0
-    *   bit 2 = 1
-    *
-    * Expected result = bits 0 and 2 = 0b101 = 5
-    *
-    * If you use OR instead of XOR:
-    *   bits 0, 1, and 2 stay set = 0b111 = 7
-    */
+     * Test 6:
+     * XOR cancellation.
+     *
+     * dense = 1 + X
+     * support = {0, 1}
+     *
+     * Product:
+     * (1 + X) * (1 + X)
+     *
+     * Over GF(2):
+     * 1 + X + X + X^2 = 1 + X^2
+     *
+     * Expected:
+     * X^0 + X^2
+     */
     {
-        uint64_t result[2];
-        uint64_t dense[1] = {(1ULL << 0) | (1ULL << 1)};
+        uint64_t result[VEC_N_SIZE_64];
+        uint64_t dense[VEC_N_SIZE_64];
+        uint64_t expected[VEC_N_SIZE_64];
         uint32_t support[2] = {0, 1};
-        uint64_t expected[2] = {(1ULL << 0) | (1ULL << 2), 0};
 
-        sparse_dense_mult(result, 2, support, 2, dense, 1);
-        ok &= check("XOR cancellation, not OR", result, expected, 2);
+        clear_vec(dense);
+        clear_vec(expected);
+
+        toggle_bit(dense, 0);
+        toggle_bit(dense, 1);
+
+        toggle_bit(expected, 0);
+        toggle_bit(expected, 2);
+
+        vector_mult(result, support, 2, dense);
+        ok &= check("XOR cancellation: (1 + X)(1 + X) = 1 + X^2", result, expected);
+    }
+
+    /*
+     * Test 7:
+     * Actual sparse x dense multiplication with a much denser dense polynomial.
+     *
+     * dense has many bits set across the polynomial:
+     * - regular low bits
+     * - cross-word boundary bits
+     * - bits in many different words
+     * - bits close to PARAM_N to force wraparound
+     *
+     * sparse support has:
+     * 0, 1, 7, 64, 1234
+     *
+     * Expected result is computed using the slow bit-level reference.
+     */
+    {
+        uint64_t result[VEC_N_SIZE_64];
+        uint64_t dense[VEC_N_SIZE_64];
+        uint64_t expected[VEC_N_SIZE_64];
+
+        uint32_t support[5] = {
+            0,
+            1,
+            7,
+            64,
+            1234
+        };
+
+        clear_vec(dense);
+
+        /*
+         * Fill dense with many deterministic bits.
+         * This is not random; it is reproducible.
+         */
+        for (size_t bit = 0; bit < PARAM_N; bit += 37) {
+            toggle_bit(dense, bit);
+        }
+
+        for (size_t bit = 11; bit < PARAM_N; bit += 101) {
+            toggle_bit(dense, bit);
+        }
+
+        for (size_t bit = 23; bit < PARAM_N; bit += 509) {
+            toggle_bit(dense, bit);
+        }
+
+        /*
+         * Add specific edge-case bits.
+         */
+        toggle_bit(dense, 0);
+        toggle_bit(dense, 1);
+        toggle_bit(dense, 63);
+        toggle_bit(dense, 64);
+        toggle_bit(dense, 65);
+        toggle_bit(dense, 127);
+        toggle_bit(dense, 128);
+        toggle_bit(dense, 129);
+
+        toggle_bit(dense, PARAM_N - 1);
+        toggle_bit(dense, PARAM_N - 2);
+        toggle_bit(dense, PARAM_N - 3);
+        toggle_bit(dense, PARAM_N - 64);
+        toggle_bit(dense, PARAM_N - 65);
+
+        reference_sparse_dense_mod(expected, support, 5, dense);
+
+        vector_mult(result, support, 5, dense);
+        ok &= check("actual sparse x dense multiplication with dense input",
+                    result,
+                    expected);
     }
 
     if (ok) {
-        printf("\nAll simple tests passed.\n");
+        printf("\nAll HQC-1 sparse x dense tests passed.\n");
         return 0;
     }
 
