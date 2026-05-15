@@ -2,9 +2,9 @@
 #include <stddef.h>
 #include <stdio.h>
 #include <string.h>
-#include "parameters.h"
+#include "gf2x.h"
 
-void vector_mult(
+void vect_mult(
     uint64_t *o,
     const uint32_t *support,
     size_t weight,
@@ -92,7 +92,7 @@ int main(void) {
         toggle_bit(dense, 10);
         toggle_bit(expected, 17);
 
-        vector_mult(result, support, 1, dense);
+        vect_mult(result, support, 1, dense);
         ok &= check("normal bit shift: X^10 * X^7 = X^17", result, expected);
     }
 
@@ -118,7 +118,7 @@ int main(void) {
         toggle_bit(dense, 63);
         toggle_bit(expected, 64);
 
-        vector_mult(result, support, 1, dense);
+        vect_mult(result, support, 1, dense);
         ok &= check("cross word boundary: X^63 * X = X^64", result, expected);
     }
 
@@ -144,7 +144,7 @@ int main(void) {
         toggle_bit(dense, 3);
         toggle_bit(expected, 67);
 
-        vector_mult(result, support, 1, dense);
+        vect_mult(result, support, 1, dense);
         ok &= check("whole-word shift: X^3 * X^64 = X^67", result, expected);
     }
 
@@ -176,7 +176,7 @@ int main(void) {
         toggle_bit(dense, PARAM_N - 1);
         toggle_bit(expected, 0);
 
-        vector_mult(result, support, 1, dense);
+        vect_mult(result, support, 1, dense);
         ok &= check("mod wrap: X^(n-1) * X = 1", result, expected);
     }
 
@@ -205,7 +205,7 @@ int main(void) {
         toggle_bit(dense, PARAM_N - 3);
         toggle_bit(expected, 2);
 
-        vector_mult(result, support, 1, dense);
+        vect_mult(result, support, 1, dense);
         ok &= check("mod wrap: X^(n-3) * X^5 = X^2", result, expected);
     }
 
@@ -240,7 +240,7 @@ int main(void) {
         toggle_bit(expected, 0);
         toggle_bit(expected, 2);
 
-        vector_mult(result, support, 2, dense);
+        vect_mult(result, support, 2, dense);
         ok &= check("XOR cancellation: (1 + X)(1 + X) = 1 + X^2", result, expected);
     }
 
@@ -310,7 +310,7 @@ int main(void) {
 
         reference_sparse_dense_mod(expected, support, 5, dense);
 
-        vector_mult(result, support, 5, dense);
+        vect_mult(result, support, 5, dense);
         ok &= check("actual sparse x dense multiplication with dense input",
                     result,
                     expected);

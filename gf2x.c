@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <stddef.h>
 #include <string.h>
-#include "parameters.h"
+#include "gf2x.h"
 
 /**
  * @brief Modular reduction of a degree < 2*n polynomial mod (X^n - 1).
@@ -57,7 +57,7 @@ static void sparse_dense_mult(
     }
 }
 
-void vector_mult(
+void vect_mult(
     uint64_t *o,
     const uint32_t *support,
     size_t weight,
